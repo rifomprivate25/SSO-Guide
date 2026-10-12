@@ -184,6 +184,17 @@ grep '"strict"' apps/sso-app/tsconfig.json  <span class="c"># → "strict": true
 ├── query/client.ts  index.ts  keys.ts  optimistic.ts  provider.tsx  query-state.tsx
 └── table/columns.tsx  data-grid.tsx  features.ts  hook.ts  index.ts
         use-data-table.ts  use-table-url-sync.ts</pre></span></label>
+<label class="item"><input type="checkbox"><span class="tx"><b>Tindaklanjuti temuan audit <code>lib/</code> (12 Okt 2026)</b><p>Hasil review 18 file terhadap AGENTS.md — bereskan sebelum lanjut fase berikutnya:</p><ol>
+<li><b>Double debounce</b> (<code>table/use-table-url-sync.ts</code>): nuqs <code>limitUrlUpdates: debounce(400)</code> + timer 400ms sendiri → efektif ~800ms. Hapus satu lapisan.</li>
+<li><b>§7.5</b> (<code>query/query-state.tsx</code>): 2× <code>toLocaleTimeString</code> langsung → ganti <code>formatTime</code> dari <code>@/lib/date</code>.</li>
+<li><b>Duplikat export</b> (<code>table/index.ts</code>): <code>createAppColumnHelper</code> ada dua versi (<code>features.ts</code> + <code>hook.ts</code>) — satukan ke satu sumber kanonis.</li>
+<li><b>Barrel bocor</b> (<code>table/index.ts</code>): hapus re-export mentah <code>useTable</code> / <code>createTableHook</code> / <code>tableFeatures</code> / <code>createColumnHelper</code> — paksa lewat setup pre-bound.</li>
+<li><b>Dua jalur instansiasi tabel</b>: <code>useDataTable</code> (raw <code>useTable</code>) vs <code>useAppTable</code> — tetapkan satu yang kanonis sesuai §7.1.</li>
+<li><b>i18n</b>: selaraskan default message ke Bahasa Indonesia (<code>query-state.tsx</code>, <code>form/validators.ts</code>).</li>
+<li><b>Devtools</b> (<code>query/provider.tsx</code>): render <code>ReactQueryDevtools</code> hanya saat <code>NODE_ENV === 'development'</code>.</li>
+<li><b>Docstring</b> (<code>table/columns.tsx</code>): contoh <code>createSelectColumn</code> dibungkus <code>columnHelper.columns([...])</code> sesuai §7.2.</li>
+<li><b>Placeholder</b> (<code>navigation/navigation-data.ts</code>): gambar <code>picsum.photos</code> diganti aset asli sebelum go-live.</li>
+</ol></span></label>
 <label class="item"><input type="checkbox"><span class="tx"><b>Tulis <code>src/proxy.ts</code> (filter <code>APP_MODE</code>)</b><pre>import { NextRequest, NextResponse } from 'next/server';
 const MODE = process.env.APP_MODE ?? 'all';
 const AUTH_ROUTES = ['/login','/registration','/recovery','/verification','/consent','/logout'];
