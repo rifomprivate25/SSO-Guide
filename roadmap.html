@@ -161,10 +161,10 @@ grep '"strict"' apps/sso-app/tsconfig.json  <span class="c"># → "strict": true
 │   │   └── admin/{users,applications,modules,divisions,roles,permissions}
 │   │       <span class="c"># tiap feature: api/ components/ schemas/ types/ constants/ index.ts</span>
 │   ├── components/ui/                <span class="c"># shadcn (Base UI) — satu-satunya shared components</span>
-│   ├── lib/
-│   │   ├── ory/                      <span class="c"># kratos/hydra/keto clients (server-only)</span>
-│   │   ├── query/  table/  form/     <span class="c"># shared TanStack helpers</span>
-│   │   ├── validators/               <span class="c"># schema shared lintas feature</span>
+│   ├── lib/                          <span class="c"># shared kernel — satu-satunya jalur import antar-feature</span>
+│   │   ├── ory/                      <span class="c"># kratos/hydra/keto clients (server-only) — diisi fase 4–6</span>
+│   │   ├── query/  table/  form/     <span class="c"># shared TanStack helpers (via barrel index.ts)</span>
+│   │   ├── date/  navigation/        <span class="c"># helper tanggal + navigasi terfilter role</span>
 │   │   ├── session.ts  keto-helpers.ts  utils.ts
 │   └── proxy.ts                      <span class="c"># Next.js 16: pengganti middleware.ts</span>
 ├── next.config.ts  Dockerfile  .env.example  package.json</pre><p>Route groups <code>(auth)</code>/<code>(iam)</code> = split domain (bukan <code>(protected)/(public)</code> — pola itu untuk satu domain). Alias <code>@/*</code> → <code>src/*</code> (diatur otomatis oleh create-next-app).</p><pre>mkdir -p "apps/sso-app/src/app/(auth)" "apps/sso-app/src/app/(iam)" apps/sso-app/src/app/api \
@@ -175,6 +175,15 @@ grep '"strict"' apps/sso-app/tsconfig.json  <span class="c"># → "strict": true
   apps/sso-app/src/features/admin/{users,applications,modules,divisions,roles,permissions} \
   packages/{ory-clients,keto-schema,ui} \
   infra/{docker,kratos,hydra,keto,traefik} docs/integration</pre><p>Subfolder tiap feature (<code>api/ components/ schemas/ types/</code>) dibuat <b>saat feature dibangun</b>, tidak upfront — hindari puluhan folder kosong.</p></span></label>
+<label class="item"><input type="checkbox" checked><span class="tx"><b>Realisasi <code>lib/</code> — sesuai repo ✅</b><p>Struktur aktual yang sudah dibuat, sedikit berbeda dari rencana: <code>validators/</code> dilebur ke <code>form/validators.ts</code>; tambah <code>date/</code> dan <code>navigation/</code>.</p><pre>lib/
+├── keto-helpers.ts  session.ts  utils.ts
+├── date/index.ts
+├── form/index.ts  types.ts  validators.ts
+├── navigation/index.ts  navigation-data.ts  use-filtered-navigation.ts
+├── ory/                                          <span class="c"># masih kosong — diisi fase 4–6</span>
+├── query/client.ts  index.ts  keys.ts  optimistic.ts  provider.tsx  query-state.tsx
+└── table/columns.tsx  data-grid.tsx  features.ts  hook.ts  index.ts
+        use-data-table.ts  use-table-url-sync.ts</pre></span></label>
 <label class="item"><input type="checkbox"><span class="tx"><b>Tulis <code>src/proxy.ts</code> (filter <code>APP_MODE</code>)</b><pre>import { NextRequest, NextResponse } from 'next/server';
 const MODE = process.env.APP_MODE ?? 'all';
 const AUTH_ROUTES = ['/login','/registration','/recovery','/verification','/consent','/logout'];
@@ -483,7 +492,7 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldLabel, FieldControl, FieldError } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { RoleSchema } from '../schemas/roles-schema';
-import { firstError } from '@/lib/form/field-error';
+import { firstError } from '@/lib/form';
 
 const form = useForm({
   defaultValues: { role: '' },
@@ -535,7 +544,7 @@ export async function GET(req: NextRequest) {
   const roles = await ketoGetUserRoles(data.sub); <span class="c">// baca Keto, bukan claim</span>
   return Response.json({ sub: data.sub, roles });
 }</pre><p>Untuk external app refresh daftar role tanpa login ulang. Rate-limit endpoint ini.</p></span></label>
-<label class="item"><input type="checkbox"><span class="tx"><b>Colocate schema Zod per feature</b><p>Schema validasi tinggal di <code>src/features/&lt;area&gt;/&lt;feature&gt;/schemas/</code> — dipakai TanStack Form (client) dan API route (server). Schema yang dipakai lintas feature (misal <code>uuid</code>, pagination) taruh di <code>src/lib/validators/</code>. Tidak ada <code>req.json()</code> yang dipakai tanpa <code>safeParse</code>.</p></span></label>
+<label class="item"><input type="checkbox"><span class="tx"><b>Colocate schema Zod per feature</b><p>Schema validasi tinggal di <code>src/features/&lt;area&gt;/&lt;feature&gt;/schemas/</code> — dipakai TanStack Form (client) dan API route (server). Schema yang dipakai lintas feature (misal <code>uuid</code>, pagination) taruh di <code>lib/form/validators.ts</code>. Tidak ada <code>req.json()</code> yang dipakai tanpa <code>safeParse</code>.</p></span></label>
 </div></section>
 
 <!-- ============ PHASE 8 ============ -->
