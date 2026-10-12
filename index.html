@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSO Guide</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0f22; color: #e8ecf8; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .wrap { max-width: 720px; width: 100%; text-align: center; }
+  h1 { font-size: 2.2rem; margin-bottom: 12px; }
+  p.sub { color: #8fa0c8; margin-bottom: 40px; line-height: 1.6; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    background: #111936; border: 1px solid #24305e; border-radius: 14px;
+    padding: 32px 24px; transition: transform .15s, border-color .15s;
+  }
+  a.card:hover { transform: translateY(-4px); border-color: #4f6df5; }
+  .card .icon { font-size: 2rem; margin-bottom: 12px; }
+  .card h2 { font-size: 1.2rem; margin-bottom: 8px; }
+  .card p { color: #8fa0c8; font-size: .9rem; line-height: 1.5; }
+  footer { margin-top: 48px; color: #5a6a94; font-size: .8rem; }
+  code { background: #1a2450; padding: 2px 8px; border-radius: 6px; font-size: .85em; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SSO Guide</h1>
+    <p class="sub">Arsitektur Single Sign-On — Ory stack
+      (<code>Kratos</code> · <code>Hydra</code> · <code>Oathkeeper</code> · <code>Keto</code> v26.2.0),
+      Next.js, Traefik v3.7.</p>
+    <div class="cards">
+      <a class="card" href="roadmap.html">
+        <div class="icon">🗺️</div>
+        <h2>Roadmap</h2>
+        <p>Tahapan implementasi: fase, checklist, dan urutan kerja.</p>
+      </a>
+      <a class="card" href="system-design.html">
+        <div class="icon">🏗️</div>
+        <h2>System Design</h2>
+        <p>Diagram arsitektur: alur auth, Keto authorization model, dan jaringan.</p>
+      </a>
+    </div>
+    <footer>SSO-Guide · GitHub Pages</footer>
+  </div>
+</body>
+</html>

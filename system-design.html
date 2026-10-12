@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSO — System Design</title>
+<style>
+  :root { --bg:#0b1020; --panel:#121a30; --line:#26314f; --txt:#dbe4ff; --dim:#8fa0c8;
+          --acc:#7dd3fc; --acc2:#f0abfc; --ok:#6ee7a0; --warn:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--txt); font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+         margin:0; padding:32px 20px 64px; line-height:1.55; }
+  .wrap { max-width:1640px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 6px; }
+  h2 { font-size:18px; margin:34px 0 10px; }
+  .sub { color:var(--dim); margin:0 0 18px; font-size:14px; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#0a0f22;
+         border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:12.5px; color:var(--acc2); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:14px 0; }
+  .chips { display:flex; gap:10px; margin:18px 0 6px; flex-wrap:wrap; }
+  .chip { background:#16213d; border:1px solid var(--line); border-radius:12px; padding:10px 18px; cursor:pointer;
+         font-size:14px; font-weight:700; color:var(--txt); transition:all .2s; font-family:inherit; }
+  .chip small { display:block; font-weight:400; font-size:11.5px; color:var(--dim); }
+  .chip.active[data-flow="login"] { border-color:var(--acc); box-shadow:0 0 0 1px var(--acc); }
+  .chip.active[data-flow="oauth2"] { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok); }
+  .chip.active[data-flow="api"] { border-color:var(--acc2); box-shadow:0 0 0 1px var(--acc2); }
+  .chip.active[data-flow="role"] { border-color:var(--warn); box-shadow:0 0 0 1px var(--warn); }
+  .legend { display:flex; flex-wrap:wrap; gap:18px; font-size:13px; color:var(--dim); margin:4px 0 10px; align-items:center; }
+  .sw { display:inline-block; width:14px; height:14px; border-radius:4px; vertical-align:middle; margin-right:6px; }
+  .swbadge { display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--acc);
+             color:#0b1020; font-weight:800; font-size:11px; align-items:center; justify-content:center;
+             vertical-align:middle; margin-right:6px; }
+  svg text { font-family:ui-sans-serif,system-ui,sans-serif; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  #sys .flowpath { fill:none; stroke-width:2.5; }
+  #sys .steplbl { font-size:12px; pointer-events:none; paint-order:stroke; stroke:#0b1020; stroke-width:5px; }
+  #sys .stepbadge { cursor:pointer; }
+  #sys .stepbadge.hot circle { stroke-width:3; }
+  #steplist { display:flex; flex-direction:column; gap:8px; }
+  .step { display:flex; gap:14px; align-items:flex-start; background:var(--panel); border:1px solid var(--line);
+         border-radius:10px; padding:10px 14px; cursor:pointer; transition:border-color .15s, background .15s; }
+  .step.hot { background:#182443; }
+  .step[data-flow="login"].hot { border-color:var(--acc); } .step[data-flow="oauth2"].hot { border-color:var(--ok); }
+  .step[data-flow="api"].hot { border-color:var(--acc2); }
+  .step[data-flow="role"].hot { border-color:var(--warn); }
+  .nbadge { flex:0 0 30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+           font-weight:800; font-size:13px; background:#1d2a4d; margin-top:2px; }
+  .step[data-flow="login"] .nbadge { color:var(--acc); border:1px solid var(--acc); }
+  .step[data-flow="oauth2"] .nbadge { color:var(--ok); border:1px solid var(--ok); }
+  .step[data-flow="api"] .nbadge { color:var(--acc2); border:1px solid var(--acc2); }
+  .step[data-flow="role"] .nbadge { color:var(--warn); border:1px solid var(--warn); }
+  .step .ep { font-size:13px; font-weight:700; }
+  .step .note { font-size:12px; color:var(--dim); margin-top:2px; }
+  .decisions { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; margin-top:14px; }
+  .dcard { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .dcard h3 { margin:0 0 8px; font-size:15px; }
+  .dcard ul { margin:0; padding-left:18px; font-size:13px; color:var(--dim); }
+  .dcard li { margin:4px 0; }
+  .dcard li b { color:var(--txt); font-weight:600; }
+  .flowdesc { color:var(--dim); font-size:13.5px; margin:0 0 12px; }
+  .foot { color:var(--dim); font-size:12.5px; margin-top:44px; border-top:1px solid var(--line); padding-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>SSO — System Design</h1>
+<p class="sub">Layered blueprint of the self-hosted SSO platform: <strong>clients → edge → services → data</strong>.
+Pick a flow to trace the numbered request path through the system — the packet dot walks every hop in order.
+<br>Domains: <code>auth.example.com</code> → login &amp; account recovery (“pintu”) · <code>iam.example.com</code> → account management &amp; admin console (“akun”) ·
+<code>api.example.com</code> → API gateway · <code>shop.example.com</code> → external site.</p>
+
+<div class="chips">
+  <button class="chip active" data-flow="login">① Login flow<small>auth.example.com</small></button>
+  <button class="chip" data-flow="oauth2">② OAuth2 code flow<small>external app via Hydra</small></button>
+  <button class="chip" data-flow="api">③ API call<small>external app → microservices</small></button>
+  <button class="chip" data-flow="role">④ Role picker<small>Keto roles → active role</small></button>
+  <button class="chip" data-flow="reg">⑤ Registration<small>auth.example.com</small></button>
+  <button class="chip" data-flow="recovery">⑥ Recovery<small>auth.example.com</small></button>
+  <button class="chip" data-flow="chpwd">⑦ Change password<small>iam.example.com</small></button>
+  <button class="chip" data-flow="mfa">⑧ Activate MFA<small>iam.example.com</small></button>
+  <button class="chip" data-flow="sessions">⑨ Sessions<small>iam.example.com</small></button>
+  <button class="chip" data-flow="admin">⑩ Admin authz<small>iam.example.com</small></button>
+  <button class="chip" data-flow="logout">⑪ Logout<small>auth.example.com</small></button>
+</div>
+
+<div class="card">
+  <div class="legend">
+    <span><span class="swbadge">3</span>numbered hop in sequence</span>
+    <span><span class="sw" style="background:var(--ok)"></span>public</span>
+    <span><span class="sw" style="background:var(--acc)"></span>private intranet</span>
+    <span><span class="sw" style="background:var(--dim);border-radius:0"></span>data</span>
+  </div>
+  <svg id="sys" viewBox="0 0 2000 1120" width="100%" role="img" aria-label="SSO system design diagram">
+    <defs>
+      <marker id="mLogin" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#7dd3fc"/></marker>
+      <marker id="mOauth2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#6ee7a0"/></marker>
+      <marker id="mApi" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#f0abfc"/></marker>
+      <marker id="mRole" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#fbbf24"/></marker>
+    </defs>
+    <g id="bands"></g>
+    <g id="boxes"></g>
+    <g id="dblinks"></g>
+    <g id="flowpaths"></g>
+    <g id="flowlabels"></g>
+    <g id="flowbadges"></g>
+    <circle id="packet" r="7" fill="#ffffff" stroke="#0b1020" stroke-width="2" style="display:none;filter:drop-shadow(0 0 6px #fff)"/>
+  </svg>
+</div>
+
+<h2 id="stepTitle"></h2>
+<p class="flowdesc" id="flowdesc"></p>
+<div id="steplist"></div>
+
+<h2>Authorization model — Keto OPL</h2>
+<p class="flowdesc">Namespace graph dari <code>keto-schema.opl</code>: <strong>application → module → division → role → permission</strong>.
+Panah dibaca sebagai relasi ("Module <i>app</i> Application"). Contoh konkret di bawah memakai data shop/billing.
+</p>
+<div class="card">
+  <svg id="authz" viewBox="0 0 1600 560" width="100%" role="img" aria-label="Keto namespace graph">
+    <defs>
+      <marker id="mRel" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8fa0c8"/></marker>
+    </defs>
+    <g font-size="12" font-weight="700" letter-spacing="2">
+      <text x="40" y="40" fill="#8fa0c8">KETO NAMESPACES · RELATIONS</text>
+    </g>
+    <g id="nsboxes"></g>
+    <g id="nsarrows" font-size="12.5">
+      <path d="M310 235 L252 235" stroke="#8fa0c8" stroke-width="2" fill="none" marker-end="url(#mRel)"/>
+      <text x="281" y="222" fill="#8fa0c8" text-anchor="middle" font-style="italic">app</text>
+      <path d="M580 235 L522 235" stroke="#8fa0c8" stroke-width="2" fill="none" marker-end="url(#mRel)"/>
+      <text x="551" y="222" fill="#8fa0c8" text-anchor="middle" font-style="italic">module</text>
+      <path d="M850 235 L792 235" stroke="#8fa0c8" stroke-width="2" fill="none" marker-end="url(#mRel)"/>
+      <text x="821" y="222" fill="#8fa0c8" text-anchor="middle" font-style="italic">division</text>
+      <path d="M1120 235 L1062 235" stroke="#8fa0c8" stroke-width="2" fill="none" marker-end="url(#mRel)"/>
+      <text x="1091" y="222" fill="#8fa0c8" text-anchor="middle" font-style="italic">granted</text>
+      <path d="M955 380 L955 302" stroke="#8fa0c8" stroke-width="2" fill="none" marker-end="url(#mRel)"/>
+      <text x="972" y="342" fill="#8fa0c8" font-style="italic">member</text>
+      <path d="M910 170 C910 108, 1000 108, 1000 170" stroke="#fbbf24" stroke-width="2" fill="none" marker-end="url(#mRel)"/>
+      <text x="955" y="102" fill="#fbbf24" text-anchor="middle" font-style="italic">member (SubjectSet)</text>
+    </g>
+  </svg>
+  <div class="legend" style="margin-top:6px">
+    <span><span class="sw" style="background:var(--acc)"></span>org hierarchy</span>
+    <span><span class="sw" style="background:var(--warn)"></span>role</span>
+    <span><span class="sw" style="background:var(--acc2)"></span>permission</span>
+    <span><span class="sw" style="background:var(--ok)"></span>subject</span>
+  </div>
+</div>
+
+<div class="decisions" style="grid-template-columns:1fr 1fr">
+  <div class="dcard"><h3>Example tuples <span style="color:var(--dim);font-weight:400">— shop/billing</span></h3>
+<pre class="mono" style="font-size:12px;color:#aebadd;background:#0a0f22;border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto">Application:shop
+Module:shop:billing      #app → Application:shop
+Division:shop:billing:emea  #module → Module:shop:billing
+
+Role:shop:billing:emea:accountant
+  #division → Division:shop:billing:emea
+  #member → User:alice, User:bob
+  #member → SubjectSet(Role:…:finance-lead, "member")  ← seniors inherit down
+Role:shop:billing:emea:finance-lead
+  #member → User:carol
+
+Permission:billing.invoice.read
+  #granted → Role:…:accountant
+Permission:billing.invoice.refund
+  #granted → Role:…:finance-lead</pre>
+  </div>
+  <div class="dcard"><h3>Enforcement <span style="color:var(--dim);font-weight:400">— active role, no escalation</span></h3>
+    <ul>
+      <li><b>Picker:</b> <code>GET /relation-tuples?namespace=Role&amp;subject_id=alice</code> → list her roles.</li>
+      <li><b>① Validate:</b> <code>Role:accountant#assume @ alice</code> → may she act as it? (follows <code>member</code> SubjectSet nesting)</li>
+      <li><b>② Authorize:</b> <code>Permission:invoice.read#granted @ Role:accountant</code> → does <i>this role</i> hold it?</li>
+      <li>Never <code>Permission#check @ alice</code> alone — that passes via <i>any</i> of her roles.</li>
+      <li><b>Delegated admin:</b> <code>Role:…#manage</code> traverses up to the division admin.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Design decisions</h2>
+<div class="decisions">
+  <div class="dcard"><h3>Edge — Traefik v3.7</h3><ul>
+    <li><b>Single entrypoint</b> <code>:80</code>/<code>:443</code>; ACME via Let's Encrypt.</li>
+    <li><b>Host() routing</b> (Docker labels, no static config): <code>auth.example.com</code> → sso-auth <code>:3000</code> · <code>iam.example.com</code> → sso-iam <code>:3000</code> · <code>api.example.com</code> → Oathkeeper <code>:4455</code>. Same image, <code>APP_MODE</code> differs.</li>
+    <li><b>Rate-limit + headers</b> middleware at the edge. Chosen over Nginx for native service discovery.</li>
+  </ul></div>
+  <div class="dcard"><h3>Zero-trust network</h3><ul>
+    <li><b>Only Traefik</b> publishes host ports. Everything else is on <code>internal:true</code> Docker networks.</li>
+    <li><b>Admin APIs</b> (Hydra <code>:4445</code>, Kratos <code>:4434</code>) never leave the intranet.</li>
+    <li>External apps touch <b>public OAuth2 endpoints only</b>.</li>
+  </ul></div>
+  <div class="dcard"><h3>Scaling</h3><ul>
+    <li>Kratos, Hydra, Oathkeeper, Keto, Next.js are <b>stateless</b> → scale horizontally.</li>
+    <li><b>Postgres is the stateful tier</b> — add read replicas + PgBouncer when needed.</li>
+    <li>Oathkeeper caches Hydra JWKS/introspection to survive spikes.</li>
+  </ul></div>
+  <div class="dcard"><h3>Security notes</h3><ul>
+    <li>Secrets via <b>env / Vault</b>, never baked into images.</li>
+    <li><b>Keto authorizes every request</b>; short-lived access tokens + refresh rotation.</li>
+    <li>Optional <b>Cloudflare</b> in front for WAF / DDoS (Traefik has no full WAF).</li>
+  </ul></div>
+</div>
+
+  <div class="dcard"><h3>auth vs iam — “pintu vs akun”</h3><ul>
+    <li><b>auth.example.com</b> — unauthenticated flows: login, register, recovery, logout, OAuth2 consent.</li>
+    <li><b>iam.example.com</b> — everything needing a session: settings, MFA, sessions, admin console.</li>
+    <li>Rule: <b>kalau butuh login dulu → iam</b>. One codebase, route-separated; split deployments only when teams or security policies diverge.</li>
+  </ul></div>
+  <div class="dcard"><h3>Shared session cookie</h3><ul>
+    <li>Kratos cookie domain <code>.example.com</code> — one SSO session readable on both subdomains.</li>
+    <li><b>One identity, one login.</b> “Admin” is not a user type — it’s a Keto relation (<code>Division#admin</code>); menus hide/show based on a Keto check.</li>
+  </ul></div>
+  <div class="dcard"><h3>Data ownership</h3><ul>
+    <li><b>One Postgres, one database per service</b> (<code>kratos_db</code>, <code>hydra_db</code>, <code>keto_db</code>…) — isolated migrations, small blast radius.</li>
+    <li><b>Keto is the source of truth</b> for authz; Kratos for identities. No parallel <code>roles</code> table in <code>app_db</code> — nothing to sync, nothing to drift.</li>
+    <li>Next.js apps never touch Postgres directly — identity/permission access always goes through Ory APIs.</li>
+  </ul></div>
+  <div class="dcard"><h3>SMTP relay (courier)</h3><ul>
+    <li>Kratos <b>courier</b> renders email templates (verification, recovery) and hands off to SMTP.</li>
+    <li>Use a transactional provider (SES / Postmark / Mailgun) — SPF/DKIM/DMARC, retries and sender reputation handled for you.</li>
+  </ul></div>
+  <div class="dcard"><h3>External apps — standards, not SDKs</h3><ul>
+    <li>External apps integrate via <b>standard OIDC</b> using their own ecosystem libraries (Auth.js / Better Auth, Socialite, AppAuth…).</li>
+    <li>No proprietary client SDK to maintain. We publish an <b>integration contract</b>: discovery URL, scopes, the <code>roles</code> ID-token claim, and the <code>X-Active-Role</code> header convention.</li>
+    <li>Optional <code>GET iam.example.com/api/my-roles</code> (Bearer access token) lets apps refresh the role list without re-login; enforcement stays at Oathkeeper + Keto.</li>
+  </ul></div>
+<div class="foot">
+Component versions: Ory stack <code>v26.2.0</code>, Traefik <code>v3.7</code>, Next.js + Better Auth for external sites.
+Companions: the interactive architecture illustration and the detailed flow diagrams.
+</div>
+</div>
+
+<script>
+const ZCOL = { public:"#6ee7a0", private:"#7dd3fc", data:"#8fa0c8" };
+const FCOL = { login:"#7dd3fc", oauth2:"#6ee7a0", api:"#f0abfc", role:"#fbbf24", reg:"#6ee7a0", recovery:"#fbbf24", chpwd:"#7dd3fc", mfa:"#f0abfc", sessions:"#7dd3fc", admin:"#fbbf24", logout:"#8fa0c8" };
+const BANDS = [
+  {x:20, y:110, w:260, h:690, label:"CLIENTS", color:"#6ee7a0"},
+  {x:310, y:110, w:280, h:690, label:"EDGE", color:"#6ee7a0"},
+  {x:620, y:110, w:550, h:690, label:"SERVICES · intranet 10.0.20.0/24", color:"#7dd3fc"},
+  {x:1210, y:110, w:350, h:690, label:"MICROSERVICES · intranet", color:"#7dd3fc"},
+  {x:1590, y:110, w:370, h:690, label:"DATA", color:"#8fa0c8"},
+];
+const BOXES = [
+  {x:40, y:150, w:220, h:100, title:"Browser", subs:["user","→ auth.example.com","→ iam.example.com"], zone:"public"},
+  {x:40, y:360, w:220, h:100, title:"External App", subs:["shop.example.com","Next.js + Better Auth"], zone:"public"},
+  {x:40, y:570, w:220, h:100, title:"API Client", subs:["mobile / SPA","→ api.example.com"], zone:"public"},
+  {x:330, y:130, w:240, h:570, title:"Traefik v3.7", subs:[":80 / :443 · ACME TLS","rate limit","Host(auth.example.com) → :3000","Host(iam.example.com) → :3000","Host(api.example.com) → :4455"], zone:"public"},
+  {x:330, y:710, w:240, h:80, title:"SMTP relay", subs:["Kratos courier"], zone:"data"},
+  {x:650, y:130, w:230, h:110, title:"Next.js Auth", subs:["auth.example.com",":3000","login · recovery · consent"], zone:"private"},
+  {x:650, y:660, w:230, h:110, title:"Next.js IAM", subs:["iam.example.com",":3000","account · admin console"], zone:"private"},
+  {x:650, y:390, w:230, h:110, title:"Kratos", subs:[":4433 / :4434","identity"], zone:"private"},
+  {x:650, y:520, w:230, h:110, title:"Hydra", subs:[":4444 / :4445","OAuth2 / OIDC"], zone:"private"},
+  {x:920, y:245, w:230, h:110, title:"Oathkeeper", subs:[":4455","API gateway"], zone:"private"},
+  {x:920, y:435, w:230, h:110, title:"Keto", subs:[":4466 / :4467","permissions"], zone:"private"},
+  {x:1230, y:150, w:300, h:110, title:"Orders API", subs:[":8001","orders & checkout"], zone:"private"},
+  {x:1230, y:340, w:300, h:110, title:"Billing API", subs:[":8002","invoices & refunds"], zone:"private"},
+  {x:1230, y:530, w:300, h:110, title:"Inventory API", subs:[":8003","stock levels"], zone:"private"},
+  {x:1610, y:150, w:290, h:550, title:"Postgres", subs:[":5432","kratos_db · hydra_db","keto_db · app_db","orders_db · billing_db","inventory_db"], zone:"data"},
+];
+const DBLINKS = [
+  [[880,445],[880,490],[1610,490]],
+  [[880,575],[880,660],[1610,660]],
+  [[1150,510],[1610,510]],
+  [[1530,205],[1610,205]],
+  [[1530,395],[1610,395]],
+  [[1530,585],[1610,585]],
+];
+const FLOWS = {
+login: { name:"① Login flow", desc:"Browser establishes the central SSO session (ory_kratos_session, cookie domain .example.com).",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/login", note:"auth.example.com/login — TLS terminates at Traefik."},
+  {n:2, pts:[[570,185],[650,185]], badge:[610,185], label:[610,161], method:"GET", path:"/login", note:"Router → Next.js Auth :3000."},
+  {n:3, pts:[[765,240],[765,390]], badge:[765,315], label:[835,315], method:"GET", path:"/self-service/login/browser", note:"Initialize the Kratos login flow."},
+  {n:4, pts:[[570,420],[650,420]], badge:[610,420], label:[610,396], method:"POST", path:"/self-service/login?flow=…", note:"Credentials submitted on the private intranet."},
+  {n:5, pts:[[880,420],[900,420],[900,65],[150,65],[150,150]], badge:[525,65], label:[525,41], method:"302", path:"Set-Cookie: ory_kratos_session", note:"SSO session established.", res:true},
+ ]},
+oauth2: { name:"② OAuth2 code flow", desc:"External app (Better Auth) logs in via Hydra; the SSO session from flow ① is reused. Login/consent UI lives on auth.example.com.",
+  steps:[
+  {n:1, pts:[[260,410],[330,410]], badge:[295,410], label:[295,386], method:"GET", path:"/oauth2/auth?…", note:"PKCE: code_challenge sent."},
+  {n:2, pts:[[570,585],[650,585]], badge:[610,585], label:[610,561], method:"GET", path:"/oauth2/auth", note:"→ Hydra :4444."},
+  {n:3, pts:[[880,520],[890,520],[890,45],[280,45],[280,150],[260,150]], badge:[585,45], label:[585,21], method:"302", path:"/login?login_challenge=…", note:"Hydra delegates login to auth.example.com.", res:true},
+  {n:4, pts:[[765,240],[765,390]], badge:[765,315], label:[837,315], method:"GET", path:"/sessions/whoami", note:"SSO check — skip password if valid."},
+  {n:5, pts:[[650,210],[600,210],[600,560],[650,560]], badge:[600,385], label:[600,240], method:"PUT", path:"…/login/accept", note:"Login + consent accepted (Hydra admin :4445)."},
+  {n:6, pts:[[880,610],[900,610],[900,100],[300,100],[300,370],[260,370]], badge:[900,320], label:[900,296], method:"302", path:"?code=…", note:"Authorization code to the app callback.", res:true},
+  {n:7, pts:[[260,430],[330,430],[570,430],[570,625],[650,625]], badge:[450,430], label:[295,455], method:"POST", path:"/oauth2/token", note:"Code + verifier exchanged server-to-server."},
+  {n:8, pts:[[800,630],[800,640],[1180,640],[1180,20],[260,20],[260,380]], badge:[1180,372], label:[1205,372], method:"200", path:"tokens", note:"{access_token, id_token} → userinfo → local session.", res:true},
+ ]},
+api: { name:"③ API call", desc:"External app calls the microservices through the gateway: authenticate → authorize → route.",
+  steps:[
+  {n:1, pts:[[260,430],[330,430]], badge:[295,430], label:[295,406], method:"GET", path:"/invoices", note:"External app calls api.example.com with the Bearer token."},
+  {n:2, pts:[[570,300],[920,300]], badge:[745,300], label:[745,276], method:"GET", path:"/invoices", note:"api.example.com → Oathkeeper :4455."},
+  {n:3, pts:[[920,330],[900,330],[900,560],[880,560]], badge:[900,445], label:[900,600], method:"POST", path:"/admin/oauth2/introspect", note:"Token introspection at Hydra :4445."},
+  {n:4, pts:[[1035,355],[1035,435]], badge:[1035,395], label:[1100,395], method:"POST", path:"/relation-tuples/check", note:"Keto authorization :4466 (role + permission)."},
+  {n:5, pts:[[1150,300],[1190,300],[1190,395],[1230,395]], badge:[1190,347], label:[1190,270], method:"GET", path:"/invoices + X-User-ID", note:"Oathkeeper routes to Billing API :8002; upstream never sees the token."},
+  {n:6, pts:[[1300,340],[1200,340],[1200,105],[280,105],[280,410],[260,410]], badge:[740,105], label:[740,81], method:"200", path:"OK", note:"Response via the gateway.", res:true},
+ ]},
+role: { name:"④ Role picker", desc:"User's roles live in Keto; they travel as signed ID-token claims, the user picks an active role, and Keto enforces it on every call.",
+  steps:[
+  {n:1, pts:[[880,185],[1170,185],[1170,470],[1150,470]], badge:[1170,327], label:[1170,200], method:"GET", path:"/relation-tuples?subject=user:…", note:"At consent time, Next.js Auth fetches the user's roles from Keto :4466."},
+  {n:2, pts:[[650,600],[600,600],[600,710],[280,710],[280,480],[200,480],[200,460]], badge:[280,595], label:[280,640], method:"200", path:"id_token { roles: […] }", note:"Roles injected as signed claims — the app needs no extra API call.", res:true},
+  {n:3, pts:[[120,460],[120,500],[160,500],[160,460]], badge:[140,500], label:[140,530], method:"UI", path:"role picker", note:"User chooses the active role; stored in the Better Auth session."},
+  {n:4, pts:[[260,440],[330,440],[570,440],[570,300],[920,300]], badge:[745,300], label:[745,276], method:"GET", path:"/api/orders + X-Active-Role", note:"Active role sent as a header on every API call."},
+  {n:5, pts:[[1035,355],[1035,435]], badge:[1035,395], label:[1100,395], method:"POST", path:"/relation-tuples/check", note:"Keto verifies user ∈ role AND role may access — otherwise 403. Never trust the header alone."},
+ ]},
+reg: { name:"⑤ Registration", desc:"New user signs up at auth.example.com via Kratos self-service; email verification through courier.",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/self-service/registration/browser", note:"Open the signup form at auth.example.com."},
+  {n:2, pts:[[570,220],[625,220],[625,435],[650,435]], badge:[625,300], label:[625,210], method:"GET", path:"registration form", note:"Kratos :4433 serves the flow."},
+  {n:3, pts:[[260,230],[330,230]], badge:[295,230], label:[295,254], method:"POST", path:"/self-service/registration?flow=…", note:"Submit email + password."},
+  {n:4, pts:[[570,250],[610,250],[610,470],[650,470]], badge:[610,360], label:[610,240], method:"POST", path:"create identity", note:"Kratos hashes the password → Postgres."},
+  {n:5, pts:[[650,480],[610,480],[610,750],[570,750]], badge:[610,615], label:[610,639], method:"SMTP", path:"verification code", note:"Courier emails a code; the link completes verification."},
+ ]},
+recovery: { name:"⑥ Recovery", desc:"Forgot password at auth.example.com: one-time code by email, then choose a new password.",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/self-service/recovery/browser", note:"User clicks “forgot password”."},
+  {n:2, pts:[[570,220],[625,220],[625,435],[650,435]], badge:[625,300], label:[625,210], method:"GET", path:"recovery form", note:"Kratos :4433 serves the flow."},
+  {n:3, pts:[[260,230],[330,230]], badge:[295,230], label:[295,254], method:"POST", path:"/self-service/recovery?flow=…", note:"Submit the account email (same reply either way — no enumeration)."},
+  {n:4, pts:[[650,480],[610,480],[610,750],[570,750]], badge:[610,615], label:[610,639], method:"SMTP", path:"recovery code", note:"Courier emails a one-time code/link."},
+  {n:5, pts:[[260,255],[330,255]], badge:[295,255], label:[295,279], method:"POST", path:"/self-service/recovery?flow=…", note:"Submit the code from the email."},
+  {n:6, pts:[[570,275],[610,275],[610,470],[650,470]], badge:[610,380], label:[610,265], method:"POST", path:"set new password", note:"Code valid → user picks a new password; Kratos updates the identity."},
+ ]},
+chpwd: { name:"⑦ Change password", desc:"Logged-in user changes their password at iam.example.com/settings (Kratos settings flow).",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/settings", note:"iam.example.com/settings — session cookie required."},
+  {n:2, pts:[[570,715],[650,715]], badge:[610,715], label:[610,691], method:"GET", path:"settings page", note:"Next.js IAM :3000 renders the page."},
+  {n:3, pts:[[260,230],[330,230]], badge:[295,230], label:[295,254], method:"POST", path:"/self-service/settings?flow=…", note:"Submit current + new password."},
+  {n:4, pts:[[570,250],[610,250],[610,470],[650,470]], badge:[610,360], label:[610,240], method:"POST", path:"update password", note:"Kratos verifies the current password, re-hashes, updates the identity."},
+ ]},
+mfa: { name:"⑧ Activate MFA", desc:"User enrolls a TOTP authenticator or WebAuthn key at iam.example.com/settings.",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/settings", note:"iam.example.com/settings → “enable authenticator”."},
+  {n:2, pts:[[570,715],[650,715]], badge:[610,715], label:[610,691], method:"GET", path:"settings page", note:"Next.js IAM :3000 renders the page."},
+  {n:3, pts:[[260,230],[330,230]], badge:[295,230], label:[295,254], method:"POST", path:"/self-service/settings?flow=…", note:"Scan the QR, submit a test code."},
+  {n:4, pts:[[570,250],[610,250],[610,470],[650,470]], badge:[610,360], label:[610,240], method:"POST", path:"link credential", note:"Code valid → TOTP/WebAuthn linked. Later logins ask for the second factor."},
+ ]},
+sessions: { name:"⑨ Sessions", desc:"User lists active sessions and revokes any of them at iam.example.com — server-side via the Kratos Admin API.",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/account/sessions", note:"iam.example.com/account/sessions."},
+  {n:2, pts:[[570,715],[650,715]], badge:[610,715], label:[610,691], method:"GET", path:"sessions page", note:"Traefik → Next.js IAM :3000."},
+  {n:3, pts:[[880,700],[900,700],[900,445],[880,445]], badge:[900,572], label:[925,572], method:"GET", path:"/admin/sessions?identity_id=…", note:"Server-side → Kratos Admin :4434 (never exposed to the browser)."},
+  {n:4, pts:[[650,700],[620,700],[620,445],[650,445]], badge:[620,572], label:[620,548], method:"DELETE", path:"/admin/sessions/:id", note:"Revoke a session → that device is logged out immediately."},
+ ]},
+admin: { name:"⑩ Admin authz", desc:"Admin manages applications, modules, divisions, roles and permissions at iam.example.com/admin through the Keto Admin API.",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/admin/authz", note:"iam.example.com/admin — admin only."},
+  {n:2, pts:[[570,715],[650,715]], badge:[610,715], label:[610,691], method:"GET", path:"console", note:"Next.js IAM :3000 checks the admin session."},
+  {n:3, pts:[[880,700],[900,700],[900,435],[920,435]], badge:[900,567], label:[925,567], method:"POST", path:"/relation-tuples/check", note:"May they manage it? e.g. Division:…#administrate."},
+  {n:4, pts:[[880,740],[915,740],[915,450],[920,450]], badge:[915,595], label:[940,595], method:"PUT", path:"/admin/relation-tuples", note:"Write tuples: member · granted · admin."},
+ ]},
+logout: { name:"⑪ Logout", desc:"User logs out at auth.example.com; Kratos revokes the session.",
+  steps:[
+  {n:1, pts:[[260,200],[330,200]], badge:[295,200], label:[295,176], method:"GET", path:"/self-service/logout/browser", note:"User clicks logout."},
+  {n:2, pts:[[570,220],[625,220],[625,435],[650,435]], badge:[625,300], label:[625,210], method:"GET", path:"revoke session", note:"Kratos :4433 clears the session → redirect to login."},
+ ]},
+};
+
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("sys");
+const gBands=document.getElementById("bands"), gBoxes=document.getElementById("boxes"),
+      gDb=document.getElementById("dblinks"), gPaths=document.getElementById("flowpaths"),
+      gLabels=document.getElementById("flowlabels"), gBadges=document.getElementById("flowbadges");
+function el(n,a,p){ const e=document.createElementNS(NS,n); for(const k in a) e.setAttribute(k,a[k]); if(p) p.appendChild(e); return e; }
+
+BANDS.forEach(b=>{
+  el("rect",{x:b.x,y:b.y,width:b.w,height:b.h,rx:12,fill:"#0d1526",stroke:"#1c2742","stroke-width":1},gBands);
+  const t=el("text",{x:b.x+16,y:b.y+28,fill:b.color,"font-size":12,"font-weight":700,"letter-spacing":2},gBands);
+  t.textContent=b.label;
+});
+BOXES.forEach(b=>{
+  const cx=b.x+b.w/2;
+  el("rect",{x:b.x,y:b.y,width:b.w,height:b.h,rx:12,fill:"#0e1730",stroke:"#33406b","stroke-width":1.5},gBoxes);
+  el("rect",{x:b.x,y:b.y,width:6,height:b.h,rx:3,fill:ZCOL[b.zone]},gBoxes);
+  const t=el("text",{x:cx,y:b.y+32,fill:"#dbe4ff","font-size":15,"font-weight":700,"text-anchor":"middle"},gBoxes);
+  t.textContent=b.title;
+  b.subs.forEach((s,i)=>{ const st=el("text",{x:cx,y:b.y+54+i*19,fill:"#8fa0c8","font-size":11.5,"text-anchor":"middle"},gBoxes); st.textContent=s; });
+});
+DBLINKS.forEach(d=>{
+  el("path",{d:"M"+d.map(p=>p[0]+" "+p[1]).join(" L"),stroke:"#4a5a86","stroke-width":1.5,"stroke-dasharray":"5 5",fill:"none",opacity:0.7},gDb);
+});
+const dbt=el("text",{x:1755,y:728,fill:"#8fa0c8","font-size":11,"text-anchor":"middle",class:"mono"},gDb);
+dbt.textContent="postgres :5432 · per-service schemas";
+
+// ── Keto namespace graph ──
+const NSBOXES = [
+  {x:40, y:170, w:210, h:130, title:"Application", color:"#7dd3fc", lines:["admin: User | Role▸member","permits: administrate"]},
+  {x:310, y:170, w:210, h:130, title:"Module", color:"#7dd3fc", lines:["app: Application","admin: User | Role▸member","permits: administrate"]},
+  {x:580, y:170, w:210, h:130, title:"Division", color:"#7dd3fc", lines:["module: Module","admin: User | Role▸member","permits: administrate"]},
+  {x:850, y:170, w:210, h:130, title:"Role", color:"#fbbf24", lines:["division: Division","member: User | Role▸member","permits: assume, manage"]},
+  {x:1120, y:170, w:210, h:130, title:"Permission", color:"#f0abfc", lines:["granted: Role[]","permits: check"]},
+  {x:850, y:380, w:210, h:90, title:"User", color:"#6ee7a0", lines:["(identity subject)"]},
+];
+const gNs = document.getElementById("nsboxes");
+if(gNs) NSBOXES.forEach(b=>{
+  const cx=b.x+b.w/2;
+  el("rect",{x:b.x,y:b.y,width:b.w,height:b.h,rx:12,fill:"#0e1730",stroke:"#33406b","stroke-width":1.5},gNs);
+  el("rect",{x:b.x,y:b.y,width:6,height:b.h,rx:3,fill:b.color},gNs);
+  const t=el("text",{x:cx,y:b.y+30,fill:"#dbe4ff","font-size":15,"font-weight":700,"text-anchor":"middle"},gNs);
+  t.textContent=b.title;
+  b.lines.forEach((s,i)=>{ const st=el("text",{x:cx,y:b.y+52+i*19,fill:"#8fa0c8","font-size":11,"text-anchor":"middle",class:"mono"},gNs); st.textContent=s; });
+});
+
+let activeFlow=new URLSearchParams(location.search).get("flow")||"login";
+if(!FLOWS[activeFlow]) activeFlow="login";
+let raf=null;
+
+function renderFlow(fkey){
+  const f=FLOWS[fkey], col=FCOL[fkey];
+  cancelAnimationFrame(raf);
+  gPaths.innerHTML=""; gLabels.innerHTML=""; gBadges.innerHTML="";
+  document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("active",c.dataset.flow===fkey));
+  document.getElementById("stepTitle").textContent=f.name+" — hop by hop";
+  document.getElementById("flowdesc").textContent=f.desc;
+  f.steps.forEach(s=>{
+    const d="M"+s.pts.map(p=>p[0]+" "+p[1]).join(" L");
+    const p=el("path",{d,class:"flowpath",stroke:col,"marker-end":`url(#m${fkey[0].toUpperCase()+fkey.slice(1)})`,"data-n":s.n},gPaths);
+    if(s.res){ p.setAttribute("stroke-dasharray","8 6"); p.setAttribute("opacity","0.92"); }
+    const t=el("text",{x:s.label[0],y:s.label[1],class:"steplbl","text-anchor":"middle"},gLabels);
+    const m=el("tspan",{fill:col,"font-weight":700},t); m.textContent=s.method+" ";
+    const sp=el("tspan",{fill:"#c6d2f2",class:"mono"},t); sp.textContent=s.path;
+    const bb=t.getBBox();
+    const r=el("rect",{x:bb.x-8,y:bb.y-4,width:bb.width+16,height:bb.height+8,rx:7,fill:"#0b1020",opacity:0.9,stroke:col,"stroke-width":1});
+    t.before(r);
+    const bg=el("g",{class:"stepbadge","data-n":s.n},gBadges);
+    el("circle",{cx:s.badge[0],cy:s.badge[1],r:11,fill:col,stroke:"rgba(255,255,255,.65)","stroke-width":1.2},bg);
+    const bt=el("text",{x:s.badge[0],y:s.badge[1]+4,"text-anchor":"middle",fill:"#0b1020","font-size":11.5,"font-weight":800,style:"pointer-events:none"},bg);
+    bt.textContent=s.n;
+    [p,bg].forEach(e=>{ e.addEventListener("mouseenter",()=>hot(s.n,true)); e.addEventListener("mouseleave",()=>hot(s.n,false)); });
+    if(!s.res){ const L=p.getTotalLength(); p.style.strokeDasharray=L; p.style.strokeDashoffset=L;
+      p.getBoundingClientRect(); p.style.transition="stroke-dashoffset .45s ease"; p.style.strokeDashoffset="0";
+      setTimeout(()=>{p.style.strokeDasharray="none";},500); }
+  });
+  const list=document.getElementById("steplist"); list.innerHTML="";
+  f.steps.forEach(s=>{
+    const row=document.createElement("div"); row.className="step"; row.dataset.flow=fkey; row.dataset.n=s.n;
+    row.innerHTML=`<div class="nbadge">${s.n}</div>
+      <div><div class="ep mono"><strong style="color:${col}">${s.method}</strong> <span style="color:#aebadd">${s.path.replace(/</g,"&lt;")}</span></div>
+      <div class="note">${s.note}</div></div>`;
+    row.addEventListener("mouseenter",()=>hot(s.n,true));
+    row.addEventListener("mouseleave",()=>hot(s.n,false));
+    list.appendChild(row);
+  });
+  runPacket();
+}
+function hot(n,on){ document.querySelectorAll(`[data-n="${n}"]`).forEach(e=>e.classList.toggle("hot",on)); }
+function runPacket(){
+  const paths=[...gPaths.querySelectorAll("path")];
+  if(!paths.length) return;
+  const dot=document.getElementById("packet"); dot.style.display="block";
+  const lens=paths.map(p=>p.getTotalLength());
+  let si=0,d=0,last=performance.now(); const SPEED=320;
+  function frame(now){
+    const dt=Math.min((now-last)/1000,0.05); last=now; d+=SPEED*dt;
+    if(d>=lens[si]){ si=(si+1)%paths.length; d=0; }
+    const pt=paths[si].getPointAtLength(d);
+    dot.setAttribute("cx",pt.x); dot.setAttribute("cy",pt.y);
+    raf=requestAnimationFrame(frame);
+  }
+  raf=requestAnimationFrame(frame);
+}
+document.querySelectorAll(".chip").forEach(c=>c.addEventListener("click",()=>{activeFlow=c.dataset.flow; renderFlow(activeFlow);}));
+renderFlow(activeFlow);
+</script>
+</body>
+</html>
